@@ -9,36 +9,44 @@
 
 ##### 使用过程：
 
-###### 需要安装python3的环境、selenium模块和playsound模块，还有浏览器的驱动。
-python环境自己解决
-然后clone一下：
+###### 激活 conda 环境与安装依赖：
 
 ```bash
-git clone https://github.com/chimaoshu/SZU_Rush_for_Lessons.git
-```
-
-然后安装两个模块
-
-```bash
+conda activate course_env
 pip install selenium
-pip install playsound
 ```
-playsound模块可有可无，只是最后抢课成功会叮~~提醒你一下，看代码就知道了。
 
-然后是selenium的驱动，代码自带的那个驱动是chrome 81.0的。如果无法启动你的chrome，请到官网下载：
-[https://chromedriver.chromium.org/downloads](https://chromedriver.chromium.org/downloads)
+Mac / Linux 用户无需额外下载 chromedriver，新版 Selenium 4+ 会自动管理驱动；如使用 Windows 可确保对应版本的 chromedriver 位于 PATH 或当前目录。
 
-选择一个和你的chrome版本相同的driver下载，然后丢到代码的目录下，或者丢到python的安装目录下，和python.exe同目录。
+##### 🚀 极速抢课使用方法（零手动输入）：
 
-##### 嗯，这样准备就完成了，使用方法：
+脚本已升级**【容量满员直接排除】**策略（20/20、10/10 等满员课程 0 毫秒跳过，不发无效请求也不弹窗；一旦有人退课变成 19/20 等，毫秒级秒抢）。
+
+###### 1. 多进程并发模式（速度最快，每个进程只盯一页，超高频刷新）：
+
+你可以打开 3 个终端窗口并发运行：
 
 ```bash
-python Spider.py vpn
-python Spider.py webvpn
-```
-##### 对应两种模式。
+# 终端 1：只盯第 1 页的课程
+conda activate course_env
+python Spider.py 1
 
-##### 记得把代码里面的USERNAME和PASSWORD改成你自己的。
+# 终端 2：只盯第 2 页的课程
+conda activate course_env
+python Spider.py 2
+
+# 终端 3：只盯第 3 页的课程
+conda activate course_env
+python Spider.py 3
+```
+
+###### 2. 单进程全自动模式：
+
+```bash
+conda activate course_env
+python Spider.py
+```
+单进程下会自动在 1、2、3 页之间快速循环，满员课程直接跳过，只抢有空位名额的课程。
 
 之后照着控制台的提醒做就好了，需要f12，然后查看并复制课程id，输入后按enter。
 ![1](/pic/1.png)
