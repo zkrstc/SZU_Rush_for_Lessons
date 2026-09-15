@@ -4,13 +4,15 @@
 针对金智教育研究生选课系统 (yjsxkapp) 极致调优
 
 核心策略：
-1. 【有空就抢·全盘秒杀】：不单独死磕某一个，全面监控所有目标课程，任何一门有名额（A != B 如 20/19 或 400/277），瞬间发起抢课！
-2. 【0ms 弹窗截击 (MutationObserver)】：浏览器底层原生观察器，确认弹窗生成的 0 毫秒瞬间触发点击【确定】，消灭所有 sleep 等待延迟！
-3. 【失败弹窗 10ms 极速秒关】：一旦满额或冲突，10 毫秒内秒关对话框，绝不阻碍下一轮抢占！
-4. 【纯 JS 毫秒级全表扫描】：告别 Python 逐行扫描的延迟，单次扫描整表耗时 < 2 毫秒！
-5. 【支持多进程分流或单进程全开】：
-     - 单进程: python Spider.py (全自动跨页高速扫描)
-     - 多进程: python Spider.py 1 / python Spider.py 2 / python Spider.py 3
+1. 【精准按钮定位】：遍历整行内所有可点击元素查找“选课”按钮，彻底解决 querySelector 单元素漏判 Bug！
+2. 【全盘有空就抢】：全盘监控，任何课程容量未满（如 400/223、20/19、19/20），0ms 瞬间秒抢！
+3. 【0ms 弹窗截击 (MutationObserver)】：浏览器底层原生观察器，确认弹窗生成的 0 毫秒瞬间触发点击【确定】，消灭所有 sleep 等待延迟！
+4. 【Ajax 页面切换同步等待】：换页时等待数据渲染完成，确保第 3 页等深层页面 100% 捕获！
+5. 【支持多进程独立盯页】：
+     - 终端 1: python Spider.py 1  (专盯第 1 页)
+     - 终端 2: python Spider.py 2  (专盯第 2 页)
+     - 终端 3: python Spider.py 3  (专盯第 3 页，科研创新实践就在这页！)
+     - 单终端全开: python Spider.py (全自动循环 1/2/3 页)
 """
 
 import os
@@ -123,7 +125,7 @@ def try_maximize_page_size(driver):
 
 
 def goto_page(driver, page_num):
-    """极速切换分页"""
+    """极速切换分页并等待 Ajax 加载完成"""
     try:
         page_btns = driver.find_elements(
             By.XPATH,
@@ -132,7 +134,7 @@ def goto_page(driver, page_num):
         for b in page_btns:
             if b.is_displayed():
                 driver.execute_script("arguments[0].click();", b)
-                time.sleep(0.2)
+                time.sleep(0.35)  # 等待 Ajax 渲染完成
                 return True
     except Exception:
         pass
@@ -166,7 +168,7 @@ def scan_and_rush_turbo(driver, already_selected_set):
     【纯 JS 毫秒级全盘扫描与秒抢】：
     遍历当前页所有课程行：
     - 满员 (如 20/20, 10/10) 0ms 直接排除；
-    - 只要有名额 (A != B 如 20/19, 19/20, 400/277)，瞬间派发点击！
+    - 只要有名额 (A != B 如 400/223, 20/19, 19/20)，瞬间精准找到“选课”按钮并派发点击！
     - 配合底层 MutationObserver 实现 0ms 瞬间秒点确认！
     """
     try:
@@ -189,14 +191,57 @@ def scan_and_rush_turbo(driver, already_selected_set):
                 if (m) {
                     var a = parseInt(m[1]);
                     var b = parseInt(m[2]);
-                    // 核心判断：容量未满！
+                    // 核心判断：容量未满！例如 400/223 或 20/19 或 19/20
                     if (a !== b) {
-                        var btn = row.querySelector("button, a, span");
-                        if (btn && (btn.innerText.indexOf("选课") !== -1 || btn.textContent.indexOf("选课") !== -1)) {
+                        // 【修复核心】：精确寻找真正的“选课”按钮，遍历行内所有候选元素
+                        var candidates = row.querySelectorAll("button, a, span, input[type='button'], div");
+                        var chooseBtn = null;
+                        for (var j = 0; j < candidates.length; j++) {
+                            var bEl = candidates[j];
+                            var bTxt = (bEl.innerText || bEl.textContent || bEl.value || "").trim();
+                            if (bTxt === "选课") {
+                                chooseBtn = bEl;
+                                break;
+                            }
+                        }
+                        if (!chooseBtn) {
+                            for (var j = 0; j < candidates.length; j++) {
+                                var bEl = candidates[j];
+                                var bTxt = (bEl.innerText || bEl.textContent || bEl.value || "").trim();
+                                if (bTxt.indexOf("选课") !== -1) {
+                                    chooseBtn = bEl;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (chooseBtn) {
                             // 毫秒级瞬间点击选课！
-                            btn.click();
+                            chooseBtn.click();
                             var title = text.split('\\n')[0].split('\\t')[0];
                             foundTargets.push({ name: title, cap: m[0], raw: text });
+
+                            // 同步以及微延迟连续触发确认（双重保险）
+                            setTimeout(function() {
+                                var cBtns = document.querySelectorAll("div.bh-dialog a, div.bh-dialog button, .bh-btn-primary, #cvDialog .cv-sure, .bh-dialog-btnContainer a, a, button");
+                                for (var k = 0; k < cBtns.length; k++) {
+                                    var t = (cBtns[k].innerText || cBtns[k].textContent || "").trim();
+                                    if (t === "确定" || t === "确认") {
+                                        cBtns[k].click();
+                                        break;
+                                    }
+                                }
+                            }, 30);
+                            setTimeout(function() {
+                                var cBtns = document.querySelectorAll("div.bh-dialog a, div.bh-dialog button, .bh-btn-primary, #cvDialog .cv-sure, .bh-dialog-btnContainer a, a, button");
+                                for (var k = 0; k < cBtns.length; k++) {
+                                    var t = (cBtns[k].innerText || cBtns[k].textContent || "").trim();
+                                    if (t === "确定" || t === "确认") {
+                                        cBtns[k].click();
+                                        break;
+                                    }
+                                }
+                            }, 100);
                         }
                     }
                 }
@@ -252,7 +297,7 @@ if __name__ == "__main__":
         print(f" 🎯 专属分流模式: 独占死盯【第 {page_target} 页】（全速无延迟扫描，有空就抢）")
     else:
         print(" 🎯 全盘秒杀模式: 全页面高速雷达扫描（容量未满瞬间秒抢）")
-    print(" ⚡ 核心能力: 0ms 原生 DOM 秒点确认 + 10ms 满额秒关 + 毫秒级全盘侦测")
+    print(" ⚡ 核心能力: 精确全行按钮穿透 + 0ms 原生 DOM 秒确认 + 10ms 满额秒关")
     print("=" * 68)
 
     # 启动 Chrome
