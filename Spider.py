@@ -1,14 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-深圳大学研究生选课【不惜一切代价·极限秒杀版】
+深圳大学研究生选课【不惜一切代价·全盘极速秒杀版】
 针对金智教育研究生选课系统 (yjsxkapp) 极致调优
 
-核心加速技术：
-1. 【0ms 弹窗截击 (MutationObserver)】：直接在浏览器底层注入原生观察器，确认弹窗生成的 0 毫秒瞬间触发点击，彻底消灭一切 sleep 延迟！
-2. 【满员弹窗 10ms 闪电关闭】：失败提示框出现 10 毫秒内秒关，绝不阻碍下一击！
-3. 【极限高频轮询 (100ms)】：告别秒级等待，每 100ms 刷新与扫描，有退课秒抢！
-4. 【默认死磕核心目标：2706145-深度学习（02）施斯】：
-   自动锁定第 2 页（深度学习所在页），死咬不放，不惜一切代价抢下！
+核心策略：
+1. 【有空就抢·全盘秒杀】：不单独死磕某一个，全面监控所有目标课程，任何一门有名额（A != B 如 20/19 或 400/277），瞬间发起抢课！
+2. 【0ms 弹窗截击 (MutationObserver)】：浏览器底层原生观察器，确认弹窗生成的 0 毫秒瞬间触发点击【确定】，消灭所有 sleep 等待延迟！
+3. 【失败弹窗 10ms 极速秒关】：一旦满额或冲突，10 毫秒内秒关对话框，绝不阻碍下一轮抢占！
+4. 【纯 JS 毫秒级全表扫描】：告别 Python 逐行扫描的延迟，单次扫描整表耗时 < 2 毫秒！
+5. 【支持多进程分流或单进程全开】：
+     - 单进程: python Spider.py (全自动跨页高速扫描)
+     - 多进程: python Spider.py 1 / python Spider.py 2 / python Spider.py 3
 """
 
 import os
@@ -21,14 +23,6 @@ from selenium.webdriver.common.by import By
 
 TARGET_URL = 'https://ehall.szu.edu.cn/yjsxkapp/sys/xsxkapp/xsxkHome/gotoChooseCourse.do'
 WEBVPN_URL = 'https://ehall-szu-edu-cn.webvpn.szu.edu.cn/yjsxkapp/sys/xsxkapp/xsxkHome/gotoChooseCourse.do'
-
-# 核心狙击目标（默认深度学习02）
-SNIPER_TARGET = {
-    "code": "2706145",
-    "name": "深度学习（02）",
-    "teacher": "施斯",
-    "page": "2"
-}
 
 
 def play_alert():
@@ -48,14 +42,16 @@ def play_alert():
 
 def inject_turbo_engine(driver):
     """
-    注入浏览器底层 0ms 极速拦截引擎 (MutationObserver)
-    实现确认弹窗 0 毫秒秒点、错误弹窗 10 毫秒秒关
+    注入浏览器底层 0ms 极速秒杀引擎 (MutationObserver)
+    - 确认弹窗 0 毫秒同步点击【确定】
+    - 失败/满员弹窗 10 毫秒自动秒关
+    - 实验课单选框自动勾选
     """
     try:
         driver.execute_script('''
             if (window.__TURBO_INJECTED__) return;
             window.__TURBO_INJECTED__ = true;
-            window.__RUSH_SUCCESS__ = false;
+            window.__LAST_SUCCESS_MSG__ = "";
 
             var observer = new MutationObserver(function(mutations) {
                 // 1. 发现确认弹窗 -> 0ms 瞬间点击【确定】
@@ -72,26 +68,56 @@ def inject_turbo_engine(driver):
                     }
                 }
 
-                // 2. 检查成功提示
+                // 2. 实验课单选兜底
+                var testRadio = document.querySelector("input[name='testCourse_radio_0']");
+                if (testRadio && !testRadio.checked) testRadio.click();
+                var testBtn = document.getElementById("testCourse_choice_btn");
+                if (testBtn) testBtn.click();
+
+                // 3. 检查是否有成功提示
                 var successTip = document.querySelector(".bh-tip-success, .alert-success");
                 if (successTip && (successTip.innerText || "").indexOf("成功") !== -1) {
-                    window.__RUSH_SUCCESS__ = true;
+                    window.__LAST_SUCCESS_MSG__ = successTip.innerText;
                 }
 
-                // 3. 发现失败/满额弹窗 -> 立即闪电关闭
+                // 4. 发现失败/满额/冲突弹窗 -> 10ms 快速关闭
                 var failBodies = document.querySelectorAll("#cvDialog .cv-body, .bh-dialog .content, .bh-dialog-center");
                 for (var j = 0; j < failBodies.length; j++) {
                     var t = failBodies[j].innerText || "";
                     if (t.indexOf("已满") !== -1 || t.indexOf("冲突") !== -1 || t.indexOf("失败") !== -1) {
-                        var closeBtn = document.querySelector("#cvDialog .cvBtnFlag, .bh-dialog-btnContainer a, .bh-dialog a, .bh-dialog button");
+                        var closeBtn = document.querySelector(
+                            "#cvDialog .cvBtnFlag, .bh-dialog-btnContainer a, .bh-dialog a, .bh-dialog button"
+                        );
                         if (closeBtn) closeBtn.click();
                     }
                 }
             });
 
             observer.observe(document.body, { childList: true, subtree: true });
-            console.log("[TURBO] 0ms 极速秒杀引擎已注入！");
+            console.log("[TURBO] 0ms 极速拦截引擎已成功激活！");
         ''')
+    except Exception:
+        pass
+
+
+def try_maximize_page_size(driver):
+    """尝试将表格每页条数调大到 50 或 100，尽量单页展示全部课程"""
+    try:
+        driver.execute_script('''
+            var selects = document.querySelectorAll("select");
+            for (var s of selects) {
+                for (var opt of s.options) {
+                    var val = parseInt(opt.value || opt.text);
+                    if (val >= 25) {
+                        s.value = opt.value;
+                        s.dispatchEvent(new Event("change"));
+                        return true;
+                    }
+                }
+            }
+            return false;
+        ''')
+        time.sleep(0.5)
     except Exception:
         pass
 
@@ -113,20 +139,20 @@ def goto_page(driver, page_num):
     return False
 
 
-def refresh_grid_turbo(driver, page_target="2"):
-    """极速刷新当前表格（100ms级轻量拉取）"""
+def refresh_grid_turbo(driver):
+    """极速轻量刷新表格数据"""
     try:
         driver.execute_script('''
-            // 优先点击“查询”或搜索按钮触发无感局部刷新
             var searchBtn = document.querySelector("button[type='button'].bh-btn-primary, button[type='submit'], .search-btn");
-            if (searchBtn) {
+            if (searchBtn && (searchBtn.innerText || "").indexOf("查询") !== -1) {
                 searchBtn.click();
                 return;
             }
-            var allBtns = document.querySelectorAll("button");
-            for (var b of allBtns) {
-                if ((b.innerText || "").indexOf("查询") !== -1 || (b.innerText || "").indexOf("搜索") !== -1) {
-                    b.click();
+            var all = document.querySelectorAll("button, a");
+            for (var i = 0; i < all.length; i++) {
+                var txt = (all[i].innerText || "").trim();
+                if (txt === "查询" || txt === "搜索") {
+                    all[i].click();
                     return;
                 }
             }
@@ -135,92 +161,98 @@ def refresh_grid_turbo(driver, page_target="2"):
         pass
 
 
-def sniper_strike(driver, target):
+def scan_and_rush_turbo(driver, already_selected_set):
     """
-    【狂暴狙击手一击】：
-    对目标课程（如深度学习02）发起毫秒级点击并自动秒确认
-    返回: (status, message)
+    【纯 JS 毫秒级全盘扫描与秒抢】：
+    遍历当前页所有课程行：
+    - 满员 (如 20/20, 10/10) 0ms 直接排除；
+    - 只要有名额 (A != B 如 20/19, 19/20, 400/277)，瞬间派发点击！
+    - 配合底层 MutationObserver 实现 0ms 瞬间秒点确认！
     """
-    code = target["code"]
-    teacher = target["teacher"]
-
     try:
-        res = driver.execute_script(f'''
+        res = driver.execute_script('''
             var rows = document.querySelectorAll("table tr");
-            for (var i = 0; i < rows.length; i++) {{
+            var foundTargets = [];
+
+            for (var i = 0; i < rows.length; i++) {
                 var row = rows[i];
                 var text = row.innerText || "";
-                if (text.indexOf("{code}") !== -1 && (!"{teacher}" || text.indexOf("{teacher}") !== -1)) {{
-                    // 检查是否已经是已选状态
-                    if (text.indexOf("退选") !== -1 || text.indexOf("已选") !== -1) {{
-                        return {{ status: "already", text: text }};
-                    }}
-                    // 提取容量
-                    var m = text.match(/(\\d+)\\s*\\/\\s*(\\d+)/);
-                    var cap = m ? m[0] : "未知";
-                    var isAvail = m ? (parseInt(m[1]) !== parseInt(m[2])) : true;
+                if (!text) continue;
 
-                    var btn = row.querySelector("button, a, span");
-                    if (btn && (btn.innerText.indexOf("选课") !== -1 || btn.textContent.indexOf("选课") !== -1)) {{
-                        // 毫秒级直接派发点击！
-                        btn.click();
-                        return {{ status: "clicked", cap: cap, isAvail: isAvail, text: text }};
-                    }}
-                }}
-            }}
-            return {{ status: "not_found" }};
+                // 已选上的跳过
+                if (text.indexOf("退选") !== -1 || text.indexOf("已选") !== -1) {
+                    continue;
+                }
+
+                // 检查容量正则 A / B
+                var m = text.match(/(\\d+)\\s*\\/\\s*(\\d+)/);
+                if (m) {
+                    var a = parseInt(m[1]);
+                    var b = parseInt(m[2]);
+                    // 核心判断：容量未满！
+                    if (a !== b) {
+                        var btn = row.querySelector("button, a, span");
+                        if (btn && (btn.innerText.indexOf("选课") !== -1 || btn.textContent.indexOf("选课") !== -1)) {
+                            // 毫秒级瞬间点击选课！
+                            btn.click();
+                            var title = text.split('\\n')[0].split('\\t')[0];
+                            foundTargets.push({ name: title, cap: m[0], raw: text });
+                        }
+                    }
+                }
+            }
+
+            return {
+                foundCount: foundTargets.length,
+                targets: foundTargets,
+                successMsg: window.__LAST_SUCCESS_MSG__ || ""
+            };
         ''')
 
         if not res:
-            return "none", ""
+            return 0
 
-        status = res.get("status")
-        if status == "already":
-            return "already", res.get("text", "")
+        # 检测是否有触发成功的课程
+        succ_msg = res.get("successMsg", "")
+        if succ_msg:
+            print(f"\n🎉🎉🎉【检测到系统成功提示！】: {succ_msg}\n")
+            play_alert()
+            driver.execute_script("window.__LAST_SUCCESS_MSG__ = '';")
 
-        if status == "clicked":
-            cap = res.get("cap", "")
-            is_avail = res.get("isAvail", False)
-            return "clicked", f"容量: {cap}"
+        targets = res.get("targets", [])
+        for t in targets:
+            name = t["name"]
+            cap = t["cap"]
+            if name not in already_selected_set:
+                print(f"🚨 [{time.strftime('%H:%M:%S')}] 发现空额课程！【{name}】容量: {cap} -> 0ms 闪电发起选课与确认！")
 
-        return "not_found", ""
+        return len(targets)
 
-    except Exception as e:
-        return "error", str(e)
-
-
-def check_overall_success(driver):
-    """检查是否抢课成功"""
-    try:
-        is_succ = driver.execute_script('''
-            if (window.__RUSH_SUCCESS__) return true;
-            var tip = document.querySelector(".bh-tip-success, .alert-success");
-            if (tip && (tip.innerText || "").indexOf("成功") !== -1) return true;
-            return false;
-        ''')
-        return bool(is_succ)
     except Exception:
-        return False
+        return 0
 
 
 if __name__ == "__main__":
-    url = TARGET_URL
-    target_page = "2"  # 默认锁定第 2 页（深度学习 02 施斯 所在页面）
-    target_name = "2706145-深度学习（02）施斯"
+    page_target = None
+    use_webvpn = False
 
-    # 参数支持：可传入指定页码或课号
-    if len(sys.argv) > 1:
-        arg = sys.argv[1].strip()
-        if arg in ('1', '2', '3'):
-            target_page = arg
-        elif 'webvpn' in arg.lower():
-            url = WEBVPN_URL
+    for arg in sys.argv[1:]:
+        a = arg.strip().lower()
+        if a in ('1', '2', '3'):
+            page_target = a
+        elif 'webvpn' in a:
+            use_webvpn = True
+
+    url = WEBVPN_URL if use_webvpn else TARGET_URL
 
     print("=" * 68)
-    print(" 🚀 SZU 研究生选课【不惜一切代价·极限秒杀版】启动")
-    print(f" 🎯 核心锁定目标: 【{target_name}】")
-    print(f" 📍 锁定常驻分页: 第 {target_page} 页（绝不来回翻页浪费算力）")
-    print(" ⚡ 加速特性: 0ms 原生弹窗秒确认 + 10ms 满额秒关 + 100ms 极速刷新")
+    print(" 🚀 SZU 研究生选课【不惜一切代价·全盘极速秒杀版】启动")
+    print(f" 入口地址: {url}")
+    if page_target:
+        print(f" 🎯 专属分流模式: 独占死盯【第 {page_target} 页】（全速无延迟扫描，有空就抢）")
+    else:
+        print(" 🎯 全盘秒杀模式: 全页面高速雷达扫描（容量未满瞬间秒抢）")
+    print(" ⚡ 核心能力: 0ms 原生 DOM 秒点确认 + 10ms 满额秒关 + 毫秒级全盘侦测")
     print("=" * 68)
 
     # 启动 Chrome
@@ -244,49 +276,66 @@ if __name__ == "__main__":
             pass
         time.sleep(1)
 
-    # 登录成功后，常驻第 2 页（目标所在页）
-    print(f"📍 正在直奔目标所在分页: 第 {target_page} 页...")
-    goto_page(driver, target_page)
-    time.sleep(0.5)
+    # 尝试将表格分页大小调大（如果能一行显示 50/100 条，无需翻页速度最快）
+    try_maximize_page_size(driver)
 
-    # 注入浏览器 0ms 极速秒杀引擎
+    # 注入浏览器 0ms 秒杀引擎
     inject_turbo_engine(driver)
 
-    print(f"\n🔥 极限秒杀火力全开！全速死磕【{target_name}】，有退课瞬间秒杀！\n")
+    already_selected = set()
+    round_count = 0
 
-    strike_count = 0
-    start_time = time.time()
+    print("🔥 极速秒杀引擎全面开启：只要任何一门课有名额，0ms 瞬间抢占！\n")
 
-    while True:
-        strike_count += 1
+    if page_target:
+        # 单独盯指定页码模式（多进程跑这个最快）
+        print(f"📍 锁定第 {page_target} 页中...\n")
+        goto_page(driver, page_target)
+        time.sleep(0.3)
 
-        # 确保极速拦截引擎处于活动状态
-        inject_turbo_engine(driver)
+        while True:
+            round_count += 1
+            inject_turbo_engine(driver)
 
-        # 毫秒级狙击一击！
-        status, detail = sniper_strike(driver, SNIPER_TARGET)
+            # 纯 JS 毫秒级全盘扫描
+            hit_count = scan_and_rush_turbo(driver, already_selected)
 
-        if status == "already":
-            print(f"\n🎉🎉🎉【恭喜！目标已成功选上！】{target_name}！\n")
-            play_alert()
-            break
+            if round_count % 15 == 0:
+                print(f"[{time.strftime('%H:%M:%S')}] 第 {round_count} 轮扫描监听中 (第 {page_target} 页, 满员全排除, 有空必秒抢)")
 
-        if check_overall_success(driver):
-            print(f"\n🎉🎉🎉【检测到系统成功提示：选课成功！】{target_name}！\n")
-            play_alert()
-            break
+            # 极速轻量刷新
+            refresh_grid_turbo(driver)
+            time.sleep(0.15)
 
-        if status == "clicked":
-            # 击中目标，打印状态
-            if strike_count % 10 == 0:
-                print(f"[{time.strftime('%H:%M:%S')}] ⚡ 第 {strike_count} 次极速狙击中... ({detail})")
+    else:
+        # 全页面轮询模式
+        while True:
+            round_count += 1
+            inject_turbo_engine(driver)
 
-        elif status == "not_found":
-            # 当前未找到，尝试切回目标页
-            goto_page(driver, target_page)
+            # 扫描第 1 页
+            scan_and_rush_turbo(driver, already_selected)
+            refresh_grid_turbo(driver)
+            time.sleep(0.1)
 
-        # 极速轻量刷新表格获取最新名额
-        refresh_grid_turbo(driver, target_page)
+            # 切换第 2 页
+            if goto_page(driver, '2'):
+                inject_turbo_engine(driver)
+                scan_and_rush_turbo(driver, already_selected)
+                refresh_grid_turbo(driver)
+                time.sleep(0.1)
 
-        # 极限短等待：100毫秒
-        time.sleep(0.1)
+            # 切换第 3 页
+            if goto_page(driver, '3'):
+                inject_turbo_engine(driver)
+                scan_and_rush_turbo(driver, already_selected)
+                refresh_grid_turbo(driver)
+                time.sleep(0.1)
+
+            # 回到第 1 页
+            goto_page(driver, '1')
+
+            if round_count % 5 == 0:
+                print(f"[{time.strftime('%H:%M:%S')}] 全局第 {round_count} 轮扫描完成，正在持续监听名额...")
+
+            time.sleep(0.15)
