@@ -104,53 +104,110 @@ def inject_turbo_engine(driver):
         pass
 
 
-def goto_page(driver, page_num):
+def goto_page(driver, page_num, max_retries=10):
     """极速切换到目标分页并等待渲染"""
-    try:
-        page_btns = driver.find_elements(
-            By.XPATH,
-            f"//a[text()='{page_num}'] | //li[text()='{page_num}'] | //span[text()='{page_num}']"
-        )
-        for b in page_btns:
-            if b.is_displayed():
-                driver.execute_script("arguments[0].click();", b)
-                time.sleep(0.35)
+    for attempt in range(max_retries):
+        try:
+            # 1. 精确匹配金智系统的分页按钮：<a role="goPageIndex" pageindex="2" title="Go第2页">2</a>
+            res = driver.execute_script(f'''
+                var sel = 'a[role="goPageIndex"][pageindex="{page_num}"], a[pageindex="{page_num}"], [role="goPageIndex"][pageindex="{page_num}"], a[title="Go第{page_num}页"], a[title*="第{page_num}页"]';
+                var btn = document.querySelector(sel);
+                if (btn) {{
+                    btn.click();
+                    btn.dispatchEvent(new MouseEvent("click", {{ bubbles: true, cancelable: true, view: window }}));
+                    if (window.$ || window.jQuery) {{
+                        try {{ (window.$ || window.jQuery)(btn).trigger("click"); }} catch(e) {{}}
+                    }}
+                    return "found";
+                }}
+                return "not_found";
+            ''')
+            if res == "found":
+                print(f"✅ 成功定位并切换至【第 {page_num} 页】！")
+                time.sleep(0.4)
                 return True
-    except Exception:
-        pass
+
+            # 兜底：限定在分页容器内（严防误点表格内的学分单元格）
+            page_btns = driver.find_elements(
+                By.XPATH,
+                f"//a[@role='goPageIndex' and @pageindex='{page_num}']"
+                f" | //a[@pageindex='{page_num}']"
+                f" | //a[@title='Go第{page_num}页']"
+                f" | //*[contains(@class, 'pagination') or contains(@class, 'pager')]//a[text()='{page_num}']"
+                f" | //*[contains(@class, 'pagination') or contains(@class, 'pager')]//li[text()='{page_num}']"
+            )
+            for b in page_btns:
+                if b.is_displayed():
+                    driver.execute_script("arguments[0].click();", b)
+                    print(f"✅ 成功通过 XPath 切换至【第 {page_num} 页】！")
+                    time.sleep(0.4)
+                    return True
+        except Exception:
+            pass
+        time.sleep(0.5)
     return False
 
 
 def refresh_page_exclusive(driver, page_target="2"):
     """
-    【独占页刷新】：
-    高频点击该页专属的刷新/重载入口：
-    1. 查找分页栏的刷新图标按钮 (.ui-icon-refresh, [title*='刷新'])
-    2. 重新点击当前页码按钮（如 '2'），触发深大系统 Ajax 重新拉取当前页最新数据，绝不跳回第 1 页！
+    【独占页极速刷新】：
+    锁定当前目标页（默认第 2 页），高频重新点击该页专属分页按钮：
+    <a href="javascript:void(0)" role="goPageIndex" pageindex="2" title="Go第2页">2</a>
+    1. 临时移除 active / current 类，确保金智系统每次都会触发最新数据拉取；
+    2. 深度模拟原生 click、MouseEvent 冒泡事件与 jQuery 触发；
+    3. 同步触发底层 jqGrid reloadGrid (如有)；
+    4. 绝不点击外部的“查询”大按钮（避免被重置回第 1 页）。
     """
     try:
         res = driver.execute_script(f'''
-            // 1. 查找分页器自带的局部刷新按钮 (不会重置页码)
+            // 1. 精准定位目标页码专属分页按钮 (真实 DOM: <a role="goPageIndex" pageindex="2" title="Go第2页">2</a>)
+            var sel = 'a[role="goPageIndex"][pageindex="{page_target}"], a[pageindex="{page_target}"], [role="goPageIndex"][pageindex="{page_target}"], a[title="Go第{page_target}页"], a[title*="第{page_target}页"]';
+            var btn = document.querySelector(sel);
+            var clicked = false;
+
+            if (btn) {{
+                // 临时移除 active 类，防止金智前端逻辑因“已在当前页”而放弃发送 Ajax
+                var hadActive = btn.classList.contains("active");
+                var hadCurrent = btn.classList.contains("current");
+                if (hadActive) btn.classList.remove("active");
+                if (hadCurrent) btn.classList.remove("current");
+
+                // 原生点击与完整事件派发
+                btn.click();
+                btn.dispatchEvent(new MouseEvent("click", {{ bubbles: true, cancelable: true, view: window }}));
+
+                if (window.$ || window.jQuery) {{
+                    try {{
+                        var $ = window.$ || window.jQuery;
+                        $(btn).trigger("click");
+                    }} catch(e) {{}}
+                }}
+
+                if (hadActive) btn.classList.add("active");
+                if (hadCurrent) btn.classList.add("current");
+                clicked = true;
+            }}
+
+            // 2. 触发底层 jqGrid 本页无重置刷新 (如金智表格底层已就绪)
+            if (window.$ || window.jQuery) {{
+                try {{
+                    var $ = window.$ || window.jQuery;
+                    var grids = $(".ui-jqgrid-btable");
+                    if (grids.length > 0) {{
+                        grids.trigger("reloadGrid");
+                    }}
+                }} catch(e) {{}}
+            }}
+
+            // 3. 查找分页条自带的局部刷新小图标 (非顶部查询)
             var pagerReload = document.querySelector(
-                ".ui-icon-refresh, [id*='refresh_'], .ui-pg-button .fa-refresh, [title*='刷新']"
+                ".bh-pager .icon-refresh, .bh-pager [title*='刷新'], .ui-icon-refresh, [role='pager'] [title*='刷新']"
             );
             if (pagerReload && pagerReload.offsetWidth > 0) {{
                 pagerReload.click();
-                return "pager_refresh";
             }}
 
-            // 2. 重新点击当前页码按钮（在 Wisedu 中直接刷新该页最新数据）
-            var pageBtns = document.querySelectorAll("a, li, span");
-            for (var i = 0; i < pageBtns.length; i++) {{
-                var el = pageBtns[i];
-                var txt = (el.innerText || el.textContent || "").trim();
-                if (txt === "{page_target}") {{
-                    el.click();
-                    return "page_click_{page_target}";
-                }}
-            }}
-
-            return "none";
+            return clicked ? "page_clicked" : "none";
         ''')
         return res
     except Exception:
@@ -160,8 +217,8 @@ def refresh_page_exclusive(driver, page_target="2"):
 def scan_and_rush_turbo(driver, already_selected_set):
     """
     【单元格级别精确容量分析与毫秒级秒抢】：
-    - 针对每一个 <td> 独立匹配纯正容量 `^\\d+/\\d+$`；
-    - 彻底杜绝与教室编号粘连；
+    - 针对每一个 <td> 独立匹配容量，排除周次、节次干扰；
+    - 彻底杜绝教室编号与容量粘连（20220/20 的历史错误彻底终结）；
     - 满额（20/20, 10/10）严格排除；
     - 发现未满额（如 400/223, 20/19, 19/20）：
       深入遍历整行所有标签，精准定位“选课”按钮并瞬间点击！
@@ -188,17 +245,19 @@ def scan_and_rush_turbo(driver, already_selected_set):
 
                 for (var k = 0; k < tds.length; k++) {
                     var cellText = (tds[k].innerText || tds[k].textContent || "").trim();
-                    // 严格匹配纯数字/纯数字格式
-                    var m = cellText.match(/^(\\d+)\\s*\\/\\s*(\\d+)$/);
-                    if (m) {
-                        realCap = m[0];
-                        var num1 = parseInt(m[1]);
-                        var num2 = parseInt(m[2]);
-                        // 核心判断：只有两数不相等，才是真正有名额！
-                        if (num1 !== num2) {
-                            hasAvailableSeat = true;
+                    // 只要包含 / 且不是周次/节次（排除 3-14周、9-10节 等）
+                    if (cellText.indexOf("/") !== -1 && cellText.indexOf("周") === -1 && cellText.indexOf("节") === -1) {
+                        var m = cellText.match(/(\\d+)\\s*\\/\\s*(\\d+)/);
+                        if (m) {
+                            var num1 = parseInt(m[1]);
+                            var num2 = parseInt(m[2]);
+                            // 核心判断：只有容量未满（两数不相等），才判定有名额！
+                            if (num1 !== num2) {
+                                hasAvailableSeat = true;
+                                realCap = m[0];
+                            }
+                            break;
                         }
-                        break;
                     }
                 }
 
@@ -229,6 +288,11 @@ def scan_and_rush_turbo(driver, already_selected_set):
                     if (chooseBtn) {
                         // 瞬间点击选课！
                         chooseBtn.click();
+                        chooseBtn.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+                        if (window.$ || window.jQuery) {
+                            try { (window.$ || window.jQuery)(chooseBtn).trigger("click"); } catch(e) {}
+                        }
+
                         var title = text.split('\\n')[0].split('\\t')[0];
                         foundTargets.push({ name: title, cap: realCap });
 
@@ -341,11 +405,12 @@ if __name__ == "__main__":
         # 1. 毫秒级精准扫描当前页（单元格独立提取），真正发现空额立马秒选
         hit_count = scan_and_rush_turbo(driver, already_selected)
 
-        # 2. 刷新当前页（点击当前页码或分页器重载，绝不跳回第 1 页！）
-        refresh_page_exclusive(driver, page_target)
+        # 2. 刷新当前页（精准点击目标页专属分页按钮，绝不跳回第 1 页！）
+        status = refresh_page_exclusive(driver, page_target)
 
-        if round_count % 15 == 0:
-            print(f"[{time.strftime('%H:%M:%S')}] 🔄 正在高频刷新死盯第 {page_target} 页 (第 {round_count} 轮, 满员全排除, 有空必秒抢)")
+        if round_count % 10 == 0:
+            status_desc = f"已点击第 {page_target} 页按钮" if status == "page_clicked" else f"状态: {status}"
+            print(f"[{time.strftime('%H:%M:%S')}] 🔄 正在极速刷新死盯第 {page_target} 页 (第 {round_count} 轮, {status_desc}, 满员全排除, 有空必秒抢)")
 
         # 3. 极速等待 0.2 秒
         time.sleep(0.2)
