@@ -1,19 +1,19 @@
 # -*- coding: utf-8 -*-
 """
-深圳大学研究生选课【定页死盯·疯狂点击刷新秒抢版】
+深圳大学研究生选课【定页死盯·精准容量·极速刷新秒杀版】
 针对金智教育研究生选课系统 (yjsxkapp) 极致调优
 
-核心策略：
-1. 【独占死盯指定页】：
+核心修复与策略：
+1. 【容量识别 Bug 彻底根除】：
+     针对单元格 <td> 严格精确匹配，彻底避免上课教室门牌号（如致理楼202）与容量（20/20）拼接成 20220/20 的解析错误！
+     满员（20/20, 10/10）绝对排除，真正有空额（如 400/223, 20/19, 19/20）立马触发！
+2. 【独占死盯指定页，防跳回第 1 页】：
      - 传 1 盯第 1 页
      - 传 2 盯第 2 页 (默认)
      - 传 3 盯第 3 页
-     绝不来回翻页，专心只盯当前页！
-2. 【疯狂点击【查询/刷新】按钮】：
-     自动精准定位页面上的【查询】/【刷新】按钮并高频点击，实时刷新最新空额！
-3. 【发现名额立马秒选】：
-     整行穿透检索，只要容量未满（如 400/223、20/19、19/20），
-     0ms 瞬间点击“选课”并通过 MutationObserver 0ms 瞬间秒点确认！
+     高频重新触发当前页码加载，绝不跳回第 1 页！
+3. 【极速 0ms 瞬间秒选与确认】：
+     全行穿透检索，一旦发现未满额课程，0ms 瞬间点击【选课】并通过底层 MutationObserver 0ms 瞬间秒点【确定】！
 """
 
 import os
@@ -98,7 +98,7 @@ def inject_turbo_engine(driver):
             });
 
             observer.observe(document.body, { childList: true, subtree: true });
-            console.log("[TURBO] 0ms 极速拦截引擎已成功激活！");
+            console.log("[TURBO] 0ms 极速拦截引擎已激活！");
         ''')
     except Exception:
         pass
@@ -121,57 +121,50 @@ def goto_page(driver, page_num):
     return False
 
 
-def trigger_refresh_visible(driver, page_target="2"):
+def refresh_page_exclusive(driver, page_target="2"):
     """
-    【精准点击刷新/查询按钮】：
-    高频点击页面上的“查询”或“刷新”按钮（之前好使的正是这个按钮）；
-    同时确保留在指定页码，绝不被重置。
+    【独占页刷新】：
+    高频点击该页专属的刷新/重载入口：
+    1. 查找分页栏的刷新图标按钮 (.ui-icon-refresh, [title*='刷新'])
+    2. 重新点击当前页码按钮（如 '2'），触发深大系统 Ajax 重新拉取当前页最新数据，绝不跳回第 1 页！
     """
-    clicked_btn_name = "刷新/查询"
     try:
-        # 优先定位文本或类包含“查询”、“刷新”、“搜索”的按钮
-        btns = driver.find_elements(
-            By.XPATH,
-            "//button[contains(., '查询') or contains(., '刷新') or contains(., '搜索')]"
-            " | //a[contains(., '查询') or contains(., '刷新') or contains(., '搜索')]"
-            " | //button[contains(@class, 'bh-btn-primary')]"
-            " | //*[contains(@class, 'ui-icon-refresh') or contains(@class, 'icon-refresh')]"
-        )
-        for b in btns:
-            if b.is_displayed():
-                txt = (b.text or b.get_attribute("title") or "").strip()
-                if txt:
-                    clicked_btn_name = txt
-                driver.execute_script("arguments[0].click();", b)
-                break
+        res = driver.execute_script(f'''
+            // 1. 查找分页器自带的局部刷新按钮 (不会重置页码)
+            var pagerReload = document.querySelector(
+                ".ui-icon-refresh, [id*='refresh_'], .ui-pg-button .fa-refresh, [title*='刷新']"
+            );
+            if (pagerReload && pagerReload.offsetWidth > 0) {{
+                pagerReload.click();
+                return "pager_refresh";
+            }}
+
+            // 2. 重新点击当前页码按钮（在 Wisedu 中直接刷新该页最新数据）
+            var pageBtns = document.querySelectorAll("a, li, span");
+            for (var i = 0; i < pageBtns.length; i++) {{
+                var el = pageBtns[i];
+                var txt = (el.innerText || el.textContent || "").trim();
+                if (txt === "{page_target}") {{
+                    el.click();
+                    return "page_click_{page_target}";
+                }}
+            }}
+
+            return "none";
+        ''')
+        return res
     except Exception:
-        pass
-
-    # 兜底：如果点击后被重置到了其他页，重新点击目标页码
-    if page_target and page_target != '1':
-        try:
-            active_pages = driver.find_elements(
-                By.XPATH,
-                f"//a[text()='{page_target}' and (contains(@class, 'active') or contains(@class, 'current') or contains(@class, 'selected'))]"
-                f" | //li[text()='{page_target}' and (contains(@class, 'active') or contains(@class, 'current') or contains(@class, 'selected'))]"
-                f" | //span[text()='{page_target}' and (contains(@class, 'active') or contains(@class, 'current') or contains(@class, 'selected'))]"
-            )
-            if not active_pages:
-                goto_page(driver, str(page_target))
-        except Exception:
-            pass
-
-    return clicked_btn_name
+        return "error"
 
 
 def scan_and_rush_turbo(driver, already_selected_set):
     """
-    【全盘行内深度扫描与毫秒级秒抢】：
-    - 遍历当前页所有课程行；
-    - 满额（如 20/20, 10/10）0ms 直接跳过；
+    【单元格级别精确容量分析与毫秒级秒抢】：
+    - 针对每一个 <td> 独立匹配纯正容量 `^\\d+/\\d+$`；
+    - 彻底杜绝与教室编号粘连；
+    - 满额（20/20, 10/10）严格排除；
     - 发现未满额（如 400/223, 20/19, 19/20）：
       深入遍历整行所有标签，精准定位“选课”按钮并瞬间点击！
-    - 配合底层 MutationObserver 0ms 瞬间自动确认！
     """
     try:
         res = driver.execute_script('''
@@ -188,55 +181,70 @@ def scan_and_rush_turbo(driver, already_selected_set):
                     continue;
                 }
 
-                // 检查容量正则 A / B
-                var m = text.match(/(\\d+)\\s*\\/\\s*(\\d+)/);
-                if (m) {
-                    var a = parseInt(m[1]);
-                    var b = parseInt(m[2]);
-                    // 核心判断：容量未满！例如 400/223 或 20/19 或 19/20
-                    if (a !== b) {
-                        // 【精准全行深度遍历】：寻找真正的“选课”按钮
-                        var candidates = row.querySelectorAll("button, a, span, input[type='button'], div");
-                        var chooseBtn = null;
+                // 【单元格级严格匹配容量】：遍历当前行的每一个 td 单元格
+                var tds = row.querySelectorAll("td");
+                var hasAvailableSeat = false;
+                var realCap = "";
+
+                for (var k = 0; k < tds.length; k++) {
+                    var cellText = (tds[k].innerText || tds[k].textContent || "").trim();
+                    // 严格匹配纯数字/纯数字格式
+                    var m = cellText.match(/^(\\d+)\\s*\\/\\s*(\\d+)$/);
+                    if (m) {
+                        realCap = m[0];
+                        var num1 = parseInt(m[1]);
+                        var num2 = parseInt(m[2]);
+                        // 核心判断：只有两数不相等，才是真正有名额！
+                        if (num1 !== num2) {
+                            hasAvailableSeat = true;
+                        }
+                        break;
+                    }
+                }
+
+                // 真正检测到有名额！
+                if (hasAvailableSeat) {
+                    // 全行穿透遍历寻找真正的“选课”按钮
+                    var candidates = row.querySelectorAll("button, a, span, input[type='button'], div");
+                    var chooseBtn = null;
+                    for (var j = 0; j < candidates.length; j++) {
+                        var bEl = candidates[j];
+                        var bTxt = (bEl.innerText || bEl.textContent || bEl.value || "").trim();
+                        if (bTxt === "选课") {
+                            chooseBtn = bEl;
+                            break;
+                        }
+                    }
+                    if (!chooseBtn) {
                         for (var j = 0; j < candidates.length; j++) {
                             var bEl = candidates[j];
                             var bTxt = (bEl.innerText || bEl.textContent || bEl.value || "").trim();
-                            if (bTxt === "选课") {
+                            if (bTxt.indexOf("选课") !== -1) {
                                 chooseBtn = bEl;
                                 break;
                             }
                         }
-                        if (!chooseBtn) {
-                            for (var j = 0; j < candidates.length; j++) {
-                                var bEl = candidates[j];
-                                var bTxt = (bEl.innerText || bEl.textContent || bEl.value || "").trim();
-                                if (bTxt.indexOf("选课") !== -1) {
-                                    chooseBtn = bEl;
+                    }
+
+                    if (chooseBtn) {
+                        // 瞬间点击选课！
+                        chooseBtn.click();
+                        var title = text.split('\\n')[0].split('\\t')[0];
+                        foundTargets.push({ name: title, cap: realCap });
+
+                        // 同步触发确认弹窗点击（与 MutationObserver 形成双保险）
+                        setTimeout(function() {
+                            var cBtns = document.querySelectorAll(
+                                "div.bh-dialog a, div.bh-dialog button, .bh-btn-primary, #cvDialog .cv-sure, .bh-dialog-btnContainer a, a, button"
+                            );
+                            for (var k = 0; k < cBtns.length; k++) {
+                                var t = (cBtns[k].innerText || cBtns[k].textContent || "").trim();
+                                if (t === "确定" || t === "确认") {
+                                    cBtns[k].click();
                                     break;
                                 }
                             }
-                        }
-
-                        if (chooseBtn) {
-                            // 瞬间点击选课！
-                            chooseBtn.click();
-                            var title = text.split('\\n')[0].split('\\t')[0];
-                            foundTargets.push({ name: title, cap: m[0], raw: text });
-
-                            // 连带触发确认弹窗点击（与 MutationObserver 形成双保险）
-                            setTimeout(function() {
-                                var cBtns = document.querySelectorAll(
-                                    "div.bh-dialog a, div.bh-dialog button, .bh-btn-primary, #cvDialog .cv-sure, .bh-dialog-btnContainer a, a, button"
-                                );
-                                for (var k = 0; k < cBtns.length; k++) {
-                                    var t = (cBtns[k].innerText || cBtns[k].textContent || "").trim();
-                                    if (t === "确定" || t === "确认") {
-                                        cBtns[k].click();
-                                        break;
-                                    }
-                                }
-                            }, 20);
-                        }
+                        }, 20);
                     }
                 }
             }
@@ -261,7 +269,7 @@ def scan_and_rush_turbo(driver, already_selected_set):
         for t in targets:
             name = t["name"]
             cap = t["cap"]
-            print(f"\n🚨 [{time.strftime('%H:%M:%S')}] 发现空位课程！【{name}】容量: {cap} -> 0ms 瞬间发起选课并确认！\n")
+            print(f"\n🚨 [{time.strftime('%H:%M:%S')}] 真正发现空位！【{name}】真实容量: {cap} -> 0ms 瞬间发起选课并确认！\n")
             play_alert()
 
         return len(targets)
@@ -285,10 +293,10 @@ if __name__ == "__main__":
     url = WEBVPN_URL if use_webvpn else TARGET_URL
 
     print("=" * 70)
-    print(" 🚀 SZU 研究生选课【定页死盯·疯狂点击刷新秒杀版】启动")
+    print(" 🚀 SZU 研究生选课【定页死盯·精准容量·极速刷新秒杀版】启动")
     print(f" 入口地址: {url}")
-    print(f" 🎯 锁定目标: 【100% 专一死盯第 {page_target} 页】（绝不跨页浪费毫秒算力！）")
-    print(f" 🔄 刷新策略: 疯狂点击页面【查询/刷新】按钮，看到空额立马秒选！")
+    print(f" 🎯 锁定目标: 【100% 专一死盯第 {page_target} 页】（绝不跳回第 1 页！）")
+    print(f" 🔄 刷新策略: 单元格严格独立提取真实容量，高频刷新当前页，有空必秒选！")
     print(" ⚡ 极速能力: 全行穿透选课定位 + 0ms 原生 DOM 秒确认 + 10ms 满额秒关")
     print("=" * 70)
 
@@ -324,20 +332,20 @@ if __name__ == "__main__":
     already_selected = set()
     round_count = 0
 
-    print(f"🔥 全力开火！疯狂点击【刷新/查询】死盯第 {page_target} 页，只要有名额立马秒抢！\n")
+    print(f"🔥 全力开火！持续高频刷新死盯第 {page_target} 页，只要有名额立马秒抢！\n")
 
     while True:
         round_count += 1
         inject_turbo_engine(driver)
 
-        # 1. 毫秒级全盘扫描当前页，发现空额立马秒选
+        # 1. 毫秒级精准扫描当前页（单元格独立提取），真正发现空额立马秒选
         hit_count = scan_and_rush_turbo(driver, already_selected)
 
-        # 2. 疯狂点击页面上的【查询/刷新】按钮！
-        clicked_name = trigger_refresh_visible(driver, page_target)
+        # 2. 刷新当前页（点击当前页码或分页器重载，绝不跳回第 1 页！）
+        refresh_page_exclusive(driver, page_target)
 
-        if round_count % 10 == 0:
-            print(f"[{time.strftime('%H:%M:%S')}] 🔄 已疯狂点击【{clicked_name}】刷新 {round_count} 轮 (死盯第 {page_target} 页中, 有空必秒抢)")
+        if round_count % 15 == 0:
+            print(f"[{time.strftime('%H:%M:%S')}] 🔄 正在高频刷新死盯第 {page_target} 页 (第 {round_count} 轮, 满员全排除, 有空必秒抢)")
 
-        # 3. 极速等待 0.25 秒（等待后端 Ajax 返回最新数据）
-        time.sleep(0.25)
+        # 3. 极速等待 0.2 秒
+        time.sleep(0.2)
