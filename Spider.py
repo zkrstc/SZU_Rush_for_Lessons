@@ -1,19 +1,19 @@
 # -*- coding: utf-8 -*-
 """
-深圳大学研究生选课【定页死盯·极速刷新秒抢版】
+深圳大学研究生选课【定页死盯·疯狂点击刷新秒抢版】
 针对金智教育研究生选课系统 (yjsxkapp) 极致调优
 
-核心逻辑：
-1. 【指定几就死盯第几页】：
-     - python Spider.py 1 -> 100% 死盯第 1 页
-     - python Spider.py 2 -> 100% 死盯第 2 页 (默认)
-     - python Spider.py 3 -> 100% 死盯第 3 页
+核心策略：
+1. 【独占死盯指定页】：
+     - 传 1 盯第 1 页
+     - 传 2 盯第 2 页 (默认)
+     - 传 3 盯第 3 页
      绝不来回翻页，专心只盯当前页！
-2. 【高频狂点“刷新”按钮】：
-     自动精准识别页面上的“刷新”按钮、刷新图标（及当前页码重载），高频持续刷新最新名额！
-3. 【看到有名额立马选课】：
-     整行深度穿透检索，一旦检测到任何课程容量未满（如 400/223、20/19、19/20），
-     毫秒级派发点击“选课”，并通过底层 MutationObserver 在 0 毫秒瞬间点击【确定】！
+2. 【疯狂点击【查询/刷新】按钮】：
+     自动精准定位页面上的【查询】/【刷新】按钮并高频点击，实时刷新最新空额！
+3. 【发现名额立马秒选】：
+     整行穿透检索，只要容量未满（如 400/223、20/19、19/20），
+     0ms 瞬间点击“选课”并通过 MutationObserver 0ms 瞬间秒点确认！
 """
 
 import os
@@ -114,61 +114,54 @@ def goto_page(driver, page_num):
         for b in page_btns:
             if b.is_displayed():
                 driver.execute_script("arguments[0].click();", b)
-                time.sleep(0.4)
+                time.sleep(0.35)
                 return True
     except Exception:
         pass
     return False
 
 
-def click_refresh_button(driver, page_target="2"):
+def trigger_refresh_visible(driver, page_target="2"):
     """
-    【精准点击刷新按钮】：
-    高频点击页面上的“刷新”按钮或刷新图标；
-    若未找到则重新点击当前页码（在 Wisedu 中会触发该页 Ajax 重新加载）
+    【精准点击刷新/查询按钮】：
+    高频点击页面上的“查询”或“刷新”按钮（之前好使的正是这个按钮）；
+    同时确保留在指定页码，绝不被重置。
     """
+    clicked_btn_name = "刷新/查询"
     try:
-        res = driver.execute_script(f'''
-            // 1. 查找文本包含“刷新”或标题为“刷新”的按钮/图标
-            var refreshElements = document.querySelectorAll(
-                "button, a, span, div, [title*='刷新'], [aria-label*='刷新'], [class*='refresh'], [id*='refresh'], .ui-pg-button, .icon-refresh"
-            );
-            for (var i = 0; i < refreshElements.length; i++) {{
-                var el = refreshElements[i];
-                var txt = (el.innerText || el.textContent || "").trim();
-                var title = (el.getAttribute("title") || "").trim();
-                var cls = el.className || "";
-                var id = el.id || "";
-                if (txt === "刷新" || txt.indexOf("刷新") !== -1 || title === "刷新" || title.indexOf("刷新") !== -1 || cls.indexOf("refresh") !== -1 || id.indexOf("refresh") !== -1) {{
-                    if (el.offsetWidth > 0 && el.offsetHeight > 0) {{
-                        el.click();
-                        return "clicked_refresh_btn";
-                    }}
-                }}
-            }}
-
-            // 2. 查找“查询”按钮
-            var searchBtn = document.querySelector("button[type='button'].bh-btn-primary, button[type='submit'], .search-btn");
-            if (searchBtn && (searchBtn.innerText || "").indexOf("查询") !== -1) {{
-                searchBtn.click();
-                return "clicked_query_btn";
-            }}
-
-            // 3. 兜底：重新点击当前页码按钮（触发该页 Ajax 重新拉取最新名额）
-            var pageBtns = document.querySelectorAll("a, li, span");
-            for (var i = 0; i < pageBtns.length; i++) {{
-                var txt = (pageBtns[i].innerText || "").trim();
-                if (txt === "{page_target}") {{
-                    pageBtns[i].click();
-                    return "clicked_page_reload";
-                }}
-            }}
-
-            return "none";
-        ''')
-        return res
+        # 优先定位文本或类包含“查询”、“刷新”、“搜索”的按钮
+        btns = driver.find_elements(
+            By.XPATH,
+            "//button[contains(., '查询') or contains(., '刷新') or contains(., '搜索')]"
+            " | //a[contains(., '查询') or contains(., '刷新') or contains(., '搜索')]"
+            " | //button[contains(@class, 'bh-btn-primary')]"
+            " | //*[contains(@class, 'ui-icon-refresh') or contains(@class, 'icon-refresh')]"
+        )
+        for b in btns:
+            if b.is_displayed():
+                txt = (b.text or b.get_attribute("title") or "").strip()
+                if txt:
+                    clicked_btn_name = txt
+                driver.execute_script("arguments[0].click();", b)
+                break
     except Exception:
-        return "error"
+        pass
+
+    # 兜底：如果点击后被重置到了其他页，重新点击目标页码
+    if page_target and page_target != '1':
+        try:
+            active_pages = driver.find_elements(
+                By.XPATH,
+                f"//a[text()='{page_target}' and (contains(@class, 'active') or contains(@class, 'current') or contains(@class, 'selected'))]"
+                f" | //li[text()='{page_target}' and (contains(@class, 'active') or contains(@class, 'current') or contains(@class, 'selected'))]"
+                f" | //span[text()='{page_target}' and (contains(@class, 'active') or contains(@class, 'current') or contains(@class, 'selected'))]"
+            )
+            if not active_pages:
+                goto_page(driver, str(page_target))
+        except Exception:
+            pass
+
+    return clicked_btn_name
 
 
 def scan_and_rush_turbo(driver, already_selected_set):
@@ -242,7 +235,7 @@ def scan_and_rush_turbo(driver, already_selected_set):
                                         break;
                                     }
                                 }
-                            }, 30);
+                            }, 20);
                         }
                     }
                 }
@@ -268,7 +261,8 @@ def scan_and_rush_turbo(driver, already_selected_set):
         for t in targets:
             name = t["name"]
             cap = t["cap"]
-            print(f"🚨 [{time.strftime('%H:%M:%S')}] 发现空位课程！【{name}】容量: {cap} -> 0ms 瞬间发起选课并确认！")
+            print(f"\n🚨 [{time.strftime('%H:%M:%S')}] 发现空位课程！【{name}】容量: {cap} -> 0ms 瞬间发起选课并确认！\n")
+            play_alert()
 
         return len(targets)
 
@@ -291,10 +285,10 @@ if __name__ == "__main__":
     url = WEBVPN_URL if use_webvpn else TARGET_URL
 
     print("=" * 70)
-    print(" 🚀 SZU 研究生选课【定页死盯·极速刷新秒杀版】启动")
+    print(" 🚀 SZU 研究生选课【定页死盯·疯狂点击刷新秒杀版】启动")
     print(f" 入口地址: {url}")
     print(f" 🎯 锁定目标: 【100% 专一死盯第 {page_target} 页】（绝不跨页浪费毫秒算力！）")
-    print(f" 🔄 刷新策略: 高频狂点页面【刷新】按钮，看到空额（如 400/223、20/19）立马秒选！")
+    print(f" 🔄 刷新策略: 疯狂点击页面【查询/刷新】按钮，看到空额立马秒选！")
     print(" ⚡ 极速能力: 全行穿透选课定位 + 0ms 原生 DOM 秒确认 + 10ms 满额秒关")
     print("=" * 70)
 
@@ -330,7 +324,7 @@ if __name__ == "__main__":
     already_selected = set()
     round_count = 0
 
-    print(f"🔥 全力开火！持续狂点【刷新】死盯第 {page_target} 页，只要有名额立马秒抢！\n")
+    print(f"🔥 全力开火！疯狂点击【刷新/查询】死盯第 {page_target} 页，只要有名额立马秒抢！\n")
 
     while True:
         round_count += 1
@@ -339,11 +333,11 @@ if __name__ == "__main__":
         # 1. 毫秒级全盘扫描当前页，发现空额立马秒选
         hit_count = scan_and_rush_turbo(driver, already_selected)
 
-        if round_count % 15 == 0:
-            print(f"[{time.strftime('%H:%M:%S')}] 已刷新扫描 {round_count} 轮 (死盯第 {page_target} 页中, 满员全排除, 有空必秒抢)")
+        # 2. 疯狂点击页面上的【查询/刷新】按钮！
+        clicked_name = trigger_refresh_visible(driver, page_target)
 
-        # 2. 狂点刷新按钮，获取最新名额
-        click_refresh_button(driver, page_target)
+        if round_count % 10 == 0:
+            print(f"[{time.strftime('%H:%M:%S')}] 🔄 已疯狂点击【{clicked_name}】刷新 {round_count} 轮 (死盯第 {page_target} 页中, 有空必秒抢)")
 
-        # 3. 极速等待：150毫秒
-        time.sleep(0.15)
+        # 3. 极速等待 0.25 秒（等待后端 Ajax 返回最新数据）
+        time.sleep(0.25)
