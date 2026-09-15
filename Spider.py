@@ -1,17 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-深圳大学研究生选课极速抢课脚本 (SZU Graduate Student Course Rush)
-针对金智教育研究生选课系统 (yjsxkapp) 定制
+深圳大学研究生选课【不惜一切代价·极限秒杀版】
+针对金智教育研究生选课系统 (yjsxkapp) 极致调优
 
-核心策略：
-1. 【满员直接排除】：容量为 20/20、10/10、30/30 等满额课程 0 毫秒跳过，不发无效请求，不弹框；
-2. 【有空位秒杀】：一旦检测到容量未满（如 19/20、400/277 或有人退课），毫秒级触发“选课”并秒点确认；
-3. 【秒点确认框】：深度适配金智教育 bh-dialog 的 <a> 和 <button> 确认按钮，杜绝卡在“确定要选择吗”；
-4. 【支持多进程独立盯页】：
-     - 终端 1: python Spider.py 1  (只盯第 1 页，超高频刷新)
-     - 终端 2: python Spider.py 2  (只盯第 2 页，超高频刷新)
-     - 终端 3: python Spider.py 3  (只盯第 3 页，超高频刷新)
-     - 或直接运行: python Spider.py (单进程全自动轮询全部页面)
+核心加速技术：
+1. 【0ms 弹窗截击 (MutationObserver)】：直接在浏览器底层注入原生观察器，确认弹窗生成的 0 毫秒瞬间触发点击，彻底消灭一切 sleep 延迟！
+2. 【满员弹窗 10ms 闪电关闭】：失败提示框出现 10 毫秒内秒关，绝不阻碍下一击！
+3. 【极限高频轮询 (100ms)】：告别秒级等待，每 100ms 刷新与扫描，有退课秒抢！
+4. 【默认死磕核心目标：2706145-深度学习（02）施斯】：
+   自动锁定第 2 页（深度学习所在页），死咬不放，不惜一切代价抢下！
 """
 
 import os
@@ -24,6 +21,14 @@ from selenium.webdriver.common.by import By
 
 TARGET_URL = 'https://ehall.szu.edu.cn/yjsxkapp/sys/xsxkapp/xsxkHome/gotoChooseCourse.do'
 WEBVPN_URL = 'https://ehall-szu-edu-cn.webvpn.szu.edu.cn/yjsxkapp/sys/xsxkapp/xsxkHome/gotoChooseCourse.do'
+
+# 核心狙击目标（默认深度学习02）
+SNIPER_TARGET = {
+    "code": "2706145",
+    "name": "深度学习（02）",
+    "teacher": "施斯",
+    "page": "2"
+}
 
 
 def play_alert():
@@ -38,33 +43,61 @@ def play_alert():
             return
         except Exception:
             pass
-    print('\a', end='', flush=True)
+    print('\a\a\a', end='', flush=True)
 
 
-def check_capacity_available(row_text):
+def inject_turbo_engine(driver):
     """
-    检查容量是否未满（容量满了直接排除）：
-    返回: (is_available, capacity_str)
+    注入浏览器底层 0ms 极速拦截引擎 (MutationObserver)
+    实现确认弹窗 0 毫秒秒点、错误弹窗 10 毫秒秒关
     """
-    match = re.search(r'(\d+)\s*/\s*(\d+)', row_text)
-    if match:
-        a = int(match.group(1))
-        b = int(match.group(2))
-        cap_str = f"{a}/{b}"
-        # 两数相等，说明已满员 (如 20/20, 10/10, 30/30)
-        if a == b:
-            return False, cap_str
-        # 两数不等，说明有名额空缺 (如 19/20 或 400/277)
-        return True, cap_str
+    try:
+        driver.execute_script('''
+            if (window.__TURBO_INJECTED__) return;
+            window.__TURBO_INJECTED__ = true;
+            window.__RUSH_SUCCESS__ = false;
 
-    if '已满' in row_text or '满员' in row_text:
-        return False, "已满"
+            var observer = new MutationObserver(function(mutations) {
+                // 1. 发现确认弹窗 -> 0ms 瞬间点击【确定】
+                var confirmBtns = document.querySelectorAll(
+                    "div.bh-dialog a, div.bh-dialog button, div.bh-dialog-btnContainer a, " +
+                    "div.bh-dialog-btnContainer button, .bh-btn-primary, #cvDialog .cv-sure, #cvDialog .cvBtnFlag"
+                );
+                for (var i = 0; i < confirmBtns.length; i++) {
+                    var b = confirmBtns[i];
+                    var txt = (b.innerText || b.textContent || "").trim();
+                    if (txt.indexOf("确定") !== -1 || txt.indexOf("确认") !== -1 || txt.indexOf("是") !== -1) {
+                        b.click();
+                        break;
+                    }
+                }
 
-    return True, "未知"
+                // 2. 检查成功提示
+                var successTip = document.querySelector(".bh-tip-success, .alert-success");
+                if (successTip && (successTip.innerText || "").indexOf("成功") !== -1) {
+                    window.__RUSH_SUCCESS__ = true;
+                }
+
+                // 3. 发现失败/满额弹窗 -> 立即闪电关闭
+                var failBodies = document.querySelectorAll("#cvDialog .cv-body, .bh-dialog .content, .bh-dialog-center");
+                for (var j = 0; j < failBodies.length; j++) {
+                    var t = failBodies[j].innerText || "";
+                    if (t.indexOf("已满") !== -1 || t.indexOf("冲突") !== -1 || t.indexOf("失败") !== -1) {
+                        var closeBtn = document.querySelector("#cvDialog .cvBtnFlag, .bh-dialog-btnContainer a, .bh-dialog a, .bh-dialog button");
+                        if (closeBtn) closeBtn.click();
+                    }
+                }
+            });
+
+            observer.observe(document.body, { childList: true, subtree: true });
+            console.log("[TURBO] 0ms 极速秒杀引擎已注入！");
+        ''')
+    except Exception:
+        pass
 
 
 def goto_page(driver, page_num):
-    """切换分页"""
+    """极速切换分页"""
     try:
         page_btns = driver.find_elements(
             By.XPATH,
@@ -73,97 +106,28 @@ def goto_page(driver, page_num):
         for b in page_btns:
             if b.is_displayed():
                 driver.execute_script("arguments[0].click();", b)
-                time.sleep(0.3)
+                time.sleep(0.2)
                 return True
     except Exception:
         pass
     return False
 
 
-def refresh_current_grid(driver, page_target=None):
-    """轻量刷新表格数据以获取最新容量"""
-    try:
-        search_btns = driver.find_elements(By.XPATH, "//button[contains(., '查询') or contains(., '搜索')]")
-        if search_btns and search_btns[0].is_displayed():
-            driver.execute_script("arguments[0].click();", search_btns[0])
-            time.sleep(0.25)
-            return True
-
-        if page_target:
-            goto_page(driver, str(page_target))
-            return True
-    except Exception:
-        pass
-    return False
-
-
-def confirm_choose(driver):
-    """
-    极速秒点确认选课弹窗
-    针对金智教育 (bh-dialog / cvDialog) 的 <a> 链接和 <button> 深度适配
-    """
-    # 1. 优先使用 JS 点击确定（支持 a 和 button）
-    try:
-        clicked = driver.execute_script('''
-            // 金智常用弹窗按钮容器
-            var targets = document.querySelectorAll(
-                "div.bh-dialog a, div.bh-dialog button, div.bh-dialog-btnContainer a, div.bh-dialog-btnContainer button, " +
-                ".bh-btn-primary, #cvDialog .cv-sure, #cvDialog .cvBtnFlag, .modal-footer button, .modal-footer a"
-            );
-            for (var b of targets) {
-                var txt = (b.innerText || b.textContent || b.value || "").trim();
-                if (txt.indexOf("确定") !== -1 || txt.indexOf("确认") !== -1 || txt.indexOf("是") !== -1) {
-                    b.click();
-                    return true;
-                }
-            }
-            // 兜底：所有包含'确定'的按钮或链接
-            var all = document.querySelectorAll("a.bh-btn, button.bh-btn, a, button");
-            for (var b of all) {
-                var txt = (b.innerText || b.textContent || b.value || "").trim();
-                if (txt === "确定" || txt === "确认") {
-                    b.click();
-                    return true;
-                }
-            }
-            return false;
-        ''')
-        if clicked:
-            return True
-    except Exception:
-        pass
-
-    # 2. Selenium XPath 兜底
-    try:
-        btns = driver.find_elements(
-            By.XPATH,
-            "//*[contains(@class, 'bh-dialog') or contains(@class, 'modal') or @id='cvDialog']"
-            "//*[self::a or self::button or self::span][contains(text(), '确定') or contains(text(), '确认')]"
-            " | //a[text()='确定' or text()='确认']"
-            " | //button[text()='确定' or text()='确认']"
-        )
-        for b in btns:
-            if b.is_displayed():
-                driver.execute_script("arguments[0].click();", b)
-                return True
-    except Exception:
-        pass
-    return False
-
-
-def close_dialogs(driver):
-    """快速关闭提示弹窗/错误对话框"""
+def refresh_grid_turbo(driver, page_target="2"):
+    """极速刷新当前表格（100ms级轻量拉取）"""
     try:
         driver.execute_script('''
-            var btns = document.querySelectorAll(
-                "#cvDialog .cvBtnFlag, #cvDialog button, .bh-dialog-btnContainer a, .bh-dialog-btnContainer button, .modal-footer button"
-            );
-            for (var b of btns) {
-                var txt = (b.innerText || b.textContent || b.value || "").trim();
-                if (txt.indexOf("知道了") !== -1 || txt.indexOf("关闭") !== -1 || txt.indexOf("确定") !== -1) {
-                    if (b.offsetWidth > 0 && b.offsetHeight > 0) {
-                        b.click();
-                    }
+            // 优先点击“查询”或搜索按钮触发无感局部刷新
+            var searchBtn = document.querySelector("button[type='button'].bh-btn-primary, button[type='submit'], .search-btn");
+            if (searchBtn) {
+                searchBtn.click();
+                return;
+            }
+            var allBtns = document.querySelectorAll("button");
+            for (var b of allBtns) {
+                if ((b.innerText || "").indexOf("查询") !== -1 || (b.innerText || "").indexOf("搜索") !== -1) {
+                    b.click();
+                    return;
                 }
             }
         ''')
@@ -171,162 +135,99 @@ def close_dialogs(driver):
         pass
 
 
-def check_feedback(driver):
+def sniper_strike(driver, target):
     """
-    检测操作结果: 'success' | 'already' | 'fail' | 'none'
-    若发现是二次确认框，自动点击确认！
+    【狂暴狙击手一击】：
+    对目标课程（如深度学习02）发起毫秒级点击并自动秒确认
+    返回: (status, message)
     """
-    # 1. 成功浮动提示 (bh-tip-success)
-    success_tips = driver.find_elements(
-        By.XPATH,
-        "/html/body/div[contains(@class, 'bh-tip-success')]//div[@class='bh-tip-content']"
-        " | //*[contains(@class, 'alert-success')]"
-        " | //*[contains(@class, 'bh-tip') and contains(., '成功')]"
-    )
-    for st in success_tips:
-        if st.is_displayed() and st.text:
-            return 'success', st.text
+    code = target["code"]
+    teacher = target["teacher"]
 
-    # 2. 对话框信息 (bh-dialog / cvDialog)
-    dialog_bodies = driver.find_elements(
-        By.XPATH,
-        "//div[@id='cvDialog']//div[@class='cv-body']/div"
-        " | //div[contains(@class, 'bh-dialog')]//div[contains(@class, 'content')]"
-        " | //div[contains(@class, 'bh-dialog')]//div[contains(@class, 'bh-dialog-center')]"
-        " | //div[contains(@class, 'modal-body')]"
-    )
-    for db in dialog_bodies:
-        if db.is_displayed() and db.text:
-            text = db.text.strip()
-            # 如果是二次确认提示：“确定要选择吗？”，立刻点“确定”！
-            if any(kw in text for kw in ['确定要选择', '确定选择', '是否确认', '确认选择']):
-                print("  👉 检测到二次确认框，立即点击【确定】！")
-                confirm_choose(driver)
-                time.sleep(0.4)
-                return check_feedback(driver)
+    try:
+        res = driver.execute_script(f'''
+            var rows = document.querySelectorAll("table tr");
+            for (var i = 0; i < rows.length; i++) {{
+                var row = rows[i];
+                var text = row.innerText || "";
+                if (text.indexOf("{code}") !== -1 && (!"{teacher}" || text.indexOf("{teacher}") !== -1)) {{
+                    // 检查是否已经是已选状态
+                    if (text.indexOf("退选") !== -1 || text.indexOf("已选") !== -1) {{
+                        return {{ status: "already", text: text }};
+                    }}
+                    // 提取容量
+                    var m = text.match(/(\\d+)\\s*\\/\\s*(\\d+)/);
+                    var cap = m ? m[0] : "未知";
+                    var isAvail = m ? (parseInt(m[1]) !== parseInt(m[2])) : true;
 
-            if '已经存在选课结果' in text or '已选' in text:
-                return 'already', text
-            if '成功' in text:
-                return 'success', text
-            return 'fail', text
+                    var btn = row.querySelector("button, a, span");
+                    if (btn && (btn.innerText.indexOf("选课") !== -1 || btn.textContent.indexOf("选课") !== -1)) {{
+                        // 毫秒级直接派发点击！
+                        btn.click();
+                        return {{ status: "clicked", cap: cap, isAvail: isAvail, text: text }};
+                    }}
+                }}
+            }}
+            return {{ status: "not_found" }};
+        ''')
 
-    return 'none', ''
+        if not res:
+            return "none", ""
+
+        status = res.get("status")
+        if status == "already":
+            return "already", res.get("text", "")
+
+        if status == "clicked":
+            cap = res.get("cap", "")
+            is_avail = res.get("isAvail", False)
+            return "clicked", f"容量: {cap}"
+
+        return "not_found", ""
+
+    except Exception as e:
+        return "error", str(e)
 
 
-def scan_and_rush(driver, already_selected_set):
-    """
-    扫描当前表格中的课程：
-    - 满额课程：0 耗时直接排除
-    - 有空额课程：毫秒级发起抢课并自动确认
-    """
-    rows = driver.find_elements(By.XPATH, "//table//tr[td]")
-    if not rows:
-        return 0, 0
-
-    checked_count = 0
-    available_count = 0
-
-    for row in rows:
-        try:
-            row_text = row.text.strip()
-            if not row_text:
-                continue
-
-            # 课程名/课程代码
-            parts = row_text.split('\n')[0].split('\t')
-            course_name = parts[0].strip()
-
-            if course_name in already_selected_set:
-                continue
-
-            if '退选' in row_text or '已选' in row_text:
-                already_selected_set.add(course_name)
-                print(f"✅ 该课程已在选课结果中: {course_name}")
-                continue
-
-            checked_count += 1
-
-            # 【核心逻辑】：容量满直接排除！
-            is_available, cap_str = check_capacity_available(row_text)
-            if not is_available:
-                continue
-
-            # 发现未满课程！
-            available_count += 1
-            print(f"\n🚨 [{time.strftime('%H:%M:%S')}] 发现空位课程！【{course_name}】容量: {cap_str}，正在极速抢占...")
-
-            btn_candidates = row.find_elements(
-                By.XPATH,
-                ".//button[contains(., '选课')] | .//a[contains(., '选课')] | .//span[contains(., '选课')]"
-            )
-            if not btn_candidates:
-                continue
-
-            btn = btn_candidates[0]
-            # 极速点击“选课”按钮
-            driver.execute_script("arguments[0].click();", btn)
-
-            # 连续毫秒级尝试点击确认弹窗（应对动画延迟）
-            for _ in range(3):
-                time.sleep(0.15)
-                if confirm_choose(driver):
-                    break
-
-            # 实验课单选兜底
-            try:
-                driver.execute_script('''
-                    var r = document.querySelector("input[name='testCourse_radio_0']");
-                    var b = document.getElementById("testCourse_choice_btn");
-                    if (r) r.click();
-                    if (b) b.click();
-                ''')
-            except Exception:
-                pass
-
-            time.sleep(0.4)
-            res_type, msg = check_feedback(driver)
-
-            if res_type in ('success', 'already'):
-                print(f"🎉🎉🎉【抢课成功！】{course_name}！系统提示: {msg}\n")
-                already_selected_set.add(course_name)
-                play_alert()
-            elif res_type == 'fail':
-                print(f"  └ 提示: {msg}")
-            close_dialogs(driver)
-
-        except Exception:
-            close_dialogs(driver)
-
-    return checked_count, available_count
+def check_overall_success(driver):
+    """检查是否抢课成功"""
+    try:
+        is_succ = driver.execute_script('''
+            if (window.__RUSH_SUCCESS__) return true;
+            var tip = document.querySelector(".bh-tip-success, .alert-success");
+            if (tip && (tip.innerText || "").indexOf("成功") !== -1) return true;
+            return false;
+        ''')
+        return bool(is_succ)
+    except Exception:
+        return False
 
 
 if __name__ == "__main__":
-    page_target = None
-    use_webvpn = False
+    url = TARGET_URL
+    target_page = "2"  # 默认锁定第 2 页（深度学习 02 施斯 所在页面）
+    target_name = "2706145-深度学习（02）施斯"
 
-    for arg in sys.argv[1:]:
-        a = arg.strip().lower()
-        if a in ('1', '2', '3'):
-            page_target = a
-        elif 'webvpn' in a:
-            use_webvpn = True
+    # 参数支持：可传入指定页码或课号
+    if len(sys.argv) > 1:
+        arg = sys.argv[1].strip()
+        if arg in ('1', '2', '3'):
+            target_page = arg
+        elif 'webvpn' in arg.lower():
+            url = WEBVPN_URL
 
-    url = WEBVPN_URL if use_webvpn else TARGET_URL
+    print("=" * 68)
+    print(" 🚀 SZU 研究生选课【不惜一切代价·极限秒杀版】启动")
+    print(f" 🎯 核心锁定目标: 【{target_name}】")
+    print(f" 📍 锁定常驻分页: 第 {target_page} 页（绝不来回翻页浪费算力）")
+    print(" ⚡ 加速特性: 0ms 原生弹窗秒确认 + 10ms 满额秒关 + 100ms 极速刷新")
+    print("=" * 68)
 
-    print("=" * 65)
-    print(" SZU 研究生选课【极速秒杀版】启动")
-    print(f" 入口地址: {url}")
-    if page_target:
-        print(f" 🚀 多进程专属模式: 独占死盯【第 {page_target} 页】（超高频监控）")
-    else:
-        print(" 🚀 全自动模式: 轮询全部页面（容量满直接排除，有空位秒抢）")
-    print("=" * 65)
-
+    # 启动 Chrome
     driver = webdriver.Chrome()
     driver.get(url)
 
-    print('\n👉 请在弹出的浏览器中登录研究生选课系统...')
+    print('\n👉 请在弹出的浏览器中完成登录...')
 
     # 监听登录状态
     while True:
@@ -341,43 +242,51 @@ if __name__ == "__main__":
                 break
         except Exception:
             pass
-        time.sleep(1.5)
+        time.sleep(1)
 
-    already_selected = set()
-    round_idx = 0
+    # 登录成功后，常驻第 2 页（目标所在页）
+    print(f"📍 正在直奔目标所在分页: 第 {target_page} 页...")
+    goto_page(driver, target_page)
+    time.sleep(0.5)
 
-    if page_target:
-        print(f"🔥 已锁定第 {page_target} 页，开始极速高频监听...\n")
-        goto_page(driver, page_target)
-        time.sleep(0.5)
+    # 注入浏览器 0ms 极速秒杀引擎
+    inject_turbo_engine(driver)
 
-        while True:
-            round_idx += 1
-            checked, avail = scan_and_rush(driver, already_selected)
-            if round_idx % 10 == 0:
-                print(f"[{time.strftime('%H:%M:%S')}] 第 {round_idx} 轮扫描完成 (第 {page_target} 页, 监控 {checked} 门课, 满员已全排除)")
-            refresh_current_grid(driver, page_target)
-            time.sleep(0.2)
+    print(f"\n🔥 极限秒杀火力全开！全速死磕【{target_name}】，有退课瞬间秒杀！\n")
 
-    else:
-        print("🔥 开始跨页扫描抢课（容量满直接跳过）...\n")
-        while True:
-            round_idx += 1
-            # 扫描第 1 页
-            scan_and_rush(driver, already_selected)
+    strike_count = 0
+    start_time = time.time()
 
-            # 切换第 2 页
-            if goto_page(driver, '2'):
-                scan_and_rush(driver, already_selected)
+    while True:
+        strike_count += 1
 
-            # 切换第 3 页
-            if goto_page(driver, '3'):
-                scan_and_rush(driver, already_selected)
+        # 确保极速拦截引擎处于活动状态
+        inject_turbo_engine(driver)
 
-            # 回到第 1 页
-            goto_page(driver, '1')
+        # 毫秒级狙击一击！
+        status, detail = sniper_strike(driver, SNIPER_TARGET)
 
-            if round_idx % 5 == 0:
-                print(f"[{time.strftime('%H:%M:%S')}] 全页第 {round_idx} 轮扫描完成，持续监听中...")
+        if status == "already":
+            print(f"\n🎉🎉🎉【恭喜！目标已成功选上！】{target_name}！\n")
+            play_alert()
+            break
 
-            time.sleep(0.3)
+        if check_overall_success(driver):
+            print(f"\n🎉🎉🎉【检测到系统成功提示：选课成功！】{target_name}！\n")
+            play_alert()
+            break
+
+        if status == "clicked":
+            # 击中目标，打印状态
+            if strike_count % 10 == 0:
+                print(f"[{time.strftime('%H:%M:%S')}] ⚡ 第 {strike_count} 次极速狙击中... ({detail})")
+
+        elif status == "not_found":
+            # 当前未找到，尝试切回目标页
+            goto_page(driver, target_page)
+
+        # 极速轻量刷新表格获取最新名额
+        refresh_grid_turbo(driver, target_page)
+
+        # 极限短等待：100毫秒
+        time.sleep(0.1)
