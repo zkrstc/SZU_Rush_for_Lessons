@@ -94,7 +94,9 @@ def inject_turbo_engine(driver):
 
                 var observer = new MutationObserver(function(mutations) {
                     // 1. 发现确认弹窗 -> 0ms 瞬间点击【确定】
+                    //    覆盖所有弹窗框架：zeromodal / bh-dialog / cvDialog
                     var confirmBtns = document.querySelectorAll(
+                        "button[zeromodal-btn-ok], .zeromodal-btn-primary, " +
                         "div.bh-dialog a, div.bh-dialog button, div.bh-dialog-btnContainer a, " +
                         "div.bh-dialog-btnContainer button, .bh-btn-primary, #cvDialog .cv-sure, #cvDialog .cvBtnFlag, " +
                         ".bh-dialog-btn, .bh-color-primary"
@@ -102,8 +104,11 @@ def inject_turbo_engine(driver):
                     for (var i = 0; i < confirmBtns.length; i++) {
                         var b = confirmBtns[i];
                         var txt = (b.innerText || b.textContent || "").trim();
-                        if (txt.indexOf("确定") !== -1 || txt.indexOf("确认") !== -1 || txt.indexOf("是") !== -1) {
+                        if (txt === "确定" || txt === "确认") {
                             b.click();
+                            // 同时也试 dispatchEvent 保证触发
+                            try { b.dispatchEvent(new MouseEvent("click", {bubbles:true, cancelable:true})); } catch(e) {}
+                            console.log("[TURBO] 0ms 自动点击确定按钮:", b.className);
                             break;
                         }
                     }
@@ -122,15 +127,17 @@ def inject_turbo_engine(driver):
 
                     // 4. 发现失败/满额/冲突弹窗 -> 立即全部关闭（不留任何残留！）
                     var allDialogs = document.querySelectorAll(
-                        "#cvDialog, .bh-dialog, .bh-dialog-backdrop, .modal-backdrop, .bh-pop-modal"
+                        "#cvDialog, .bh-dialog, .bh-dialog-backdrop, .modal-backdrop, .bh-pop-modal, " +
+                        ".zeromodal-modal, .zeromodal-backdrop, [class*='zeromodal']"
                     );
                     for (var d = 0; d < allDialogs.length; d++) {
                         var bodyText = allDialogs[d].innerText || "";
                         if (bodyText.indexOf("已满") !== -1 || bodyText.indexOf("冲突") !== -1 ||
                             bodyText.indexOf("失败") !== -1 || bodyText.indexOf("不允许") !== -1 ||
-                            bodyText.indexOf("容量") !== -1) {
-                            // 找到关闭按钮并点击
-                            var closeBtns = allDialogs[d].querySelectorAll("a, button, .bh-dialog-close, .close");
+                            bodyText.indexOf("容量") !== -1 || bodyText.indexOf("错误") !== -1) {
+                            var closeBtns = allDialogs[d].querySelectorAll(
+                                "a, button, .bh-dialog-close, .close, .zeromodal-close, button[zeromodal-btn-ok], button[zeromodal-btn-cancel]"
+                            );
                             for (var c = 0; c < closeBtns.length; c++) {
                                 var ct = (closeBtns[c].innerText || closeBtns[c].textContent || "").trim();
                                 if (ct === "确定" || ct === "关闭" || ct === "取消" || ct === "×" ||
@@ -138,13 +145,14 @@ def inject_turbo_engine(driver):
                                     closeBtns[c].click();
                                 }
                             }
-                            // 暴力移除残留弹窗 DOM
                             try { allDialogs[d].style.display = "none"; } catch(e) {}
                         }
                     }
 
                     // 5. 清理所有残留遮罩层（防止遮挡后续操作）
-                    var masks = document.querySelectorAll(".bh-dialog-backdrop, .modal-backdrop, .bh-pop-modal-bg");
+                    var masks = document.querySelectorAll(
+                        ".bh-dialog-backdrop, .modal-backdrop, .bh-pop-modal-bg, .zeromodal-backdrop, .zeromodal-overlay"
+                    );
                     for (var m = 0; m < masks.length; m++) {
                         try { masks[m].style.display = "none"; } catch(e) {}
                     }
@@ -266,10 +274,14 @@ def clear_all_dialogs(driver):
         driver.execute_script('''
             // 点击所有弹窗的关闭/确定/取消按钮
             var dialogs = document.querySelectorAll(
-                "#cvDialog, .bh-dialog, .bh-pop-modal, [role='dialog']"
+                "#cvDialog, .bh-dialog, .bh-pop-modal, [role='dialog'], " +
+                ".zeromodal-modal, [class*='zeromodal']"
             );
             for (var d = 0; d < dialogs.length; d++) {
-                var btns = dialogs[d].querySelectorAll("a, button, .close, .bh-dialog-close");
+                var btns = dialogs[d].querySelectorAll(
+                    "a, button, .close, .bh-dialog-close, .zeromodal-close, " +
+                    "button[zeromodal-btn-ok], button[zeromodal-btn-cancel]"
+                );
                 for (var b = 0; b < btns.length; b++) {
                     var t = (btns[b].innerText || btns[b].textContent || "").trim();
                     if (t === "确定" || t === "关闭" || t === "取消" || t === "×" ||
@@ -277,13 +289,13 @@ def clear_all_dialogs(driver):
                         try { btns[b].click(); } catch(e) {}
                     }
                 }
-                // 直接隐藏
                 try { dialogs[d].style.display = "none"; } catch(e) {}
             }
 
-            // 清除所有遮罩层
+            // 清除所有遮罩层（包括 zeromodal）
             var masks = document.querySelectorAll(
-                ".bh-dialog-backdrop, .modal-backdrop, .bh-pop-modal-bg, .bh-pop-mask"
+                ".bh-dialog-backdrop, .modal-backdrop, .bh-pop-modal-bg, .bh-pop-mask, " +
+                ".zeromodal-backdrop, .zeromodal-overlay"
             );
             for (var m = 0; m < masks.length; m++) {
                 try { masks[m].style.display = "none"; } catch(e) {}
@@ -404,11 +416,42 @@ def scan_and_rush_turbo(driver, already_selected_set):
                         var title = text.split('\\n')[0].split('\\t')[0];
                         foundTargets.push({ name: title, cap: realCap, id: courseId });
 
-                        // 10ms 双保险确认（与 MutationObserver 配合）
+                        // 10ms 双保险确认（与 MutationObserver 配合，覆盖 zeromodal）
                         setTimeout(function() {
                             var cBtns = document.querySelectorAll(
+                                "button[zeromodal-btn-ok], .zeromodal-btn-primary, " +
                                 "div.bh-dialog a, div.bh-dialog button, .bh-btn-primary, " +
                                 "#cvDialog .cv-sure, .bh-dialog-btnContainer a, .bh-dialog-btnContainer button"
+                            );
+                            for (var k = 0; k < cBtns.length; k++) {
+                                var t = (cBtns[k].innerText || cBtns[k].textContent || "").trim();
+                                if (t === "确定" || t === "确认") {
+                                    cBtns[k].click();
+                                    console.log("[TURBO] 10ms 双保险点击确定:", cBtns[k].className);
+                                    break;
+                                }
+                            }
+                        }, 10);
+
+                        // 50ms 三保险（某些弹窗渲染较慢）
+                        setTimeout(function() {
+                            var cBtns = document.querySelectorAll(
+                                "button[zeromodal-btn-ok], .zeromodal-btn-primary"
+                            );
+                            for (var k = 0; k < cBtns.length; k++) {
+                                var t = (cBtns[k].innerText || cBtns[k].textContent || "").trim();
+                                if (t === "确定" || t === "确认") {
+                                    cBtns[k].click();
+                                    console.log("[TURBO] 50ms 三保险点击确定:", cBtns[k].className);
+                                    break;
+                                }
+                            }
+                        }, 50);
+
+                        // 150ms 四保险（兜底）
+                        setTimeout(function() {
+                            var cBtns = document.querySelectorAll(
+                                "button[zeromodal-btn-ok], .zeromodal-btn-primary"
                             );
                             for (var k = 0; k < cBtns.length; k++) {
                                 var t = (cBtns[k].innerText || cBtns[k].textContent || "").trim();
@@ -417,7 +460,7 @@ def scan_and_rush_turbo(driver, already_selected_set):
                                     break;
                                 }
                             }
-                        }, 10);
+                        }, 150);
 
                         // 【核心】立刻跳出循环 —— 每轮只点 1 门课！
                         clickedOne = true;
