@@ -515,10 +515,7 @@ def scan_and_rush_turbo(driver, already_selected_set):
         for t in targets:
             name = t.get("name", "")
             cap = t.get("cap", "")
-            cid = t.get("id", "")
-            api_tag = " [API已捕获]" if api_captured else ""
-            print(f"\n🚨 [{time.strftime('%H:%M:%S')}] 发现空位 → 单发精准点击！"
-                  f"【{name}】容量: {cap} (编号:{cid}){api_tag}\n")
+            print(f"\n🚨 [{time.strftime('%H:%M:%S')}] 发现空位→秒抢！【{name}】容量: {cap}\n")
             play_alert()
 
         return len(targets)
@@ -581,7 +578,6 @@ if __name__ == "__main__":
 
     already_selected = set()
     round_count = 0
-    last_api_log_time = 0
 
     print(f"🔥 全力开火！0.1s 极速刷新死盯第 {page_target} 页，单发精准秒抢！\n")
 
@@ -607,30 +603,9 @@ if __name__ == "__main__":
         status = refresh_page_exclusive(driver, page_target)
 
         # 3. 定期状态输出
-        if round_count % 20 == 0:
-            # 检查是否已捕获真正的选课 API
-            api_info = ""
-            try:
-                api_data = driver.execute_script("return window.__ENROLLMENT_API__;")
-                if api_data:
-                    api_info = f" | 选课API: {api_data.get('url', '?').split('?')[0]}"
-                else:
-                    api_info = " | 选课API: 未捕获"
-
-                # 显示最近的所有 POST 请求（帮助发现真正的选课接口）
-                now = time.time()
-                if now - last_api_log_time > 30:
-                    last_api_log_time = now
-                    all_posts = driver.execute_script("return window.__ALL_POST_APIS__ || [];")
-                    if all_posts:
-                        print(f"  📡 [最近 POST 请求一览]:")
-                        for p in all_posts[-5:]:
-                            print(f"      → {p.get('url', '?').split('?')[0]}  参数: {p.get('data', '')[:80]}")
-            except Exception:
-                pass
-
+        if round_count % 50 == 0:
             status_desc = f"✓第{page_target}页" if status == "page_clicked" else f"?{status}"
-            print(f"[{time.strftime('%H:%M:%S')}] 🔄 第 {round_count} 轮 [{status_desc}] 单发去重·有空必秒抢{api_info}")
+            print(f"[{time.strftime('%H:%M:%S')}] 🔄 第 {round_count} 轮 [{status_desc}]")
 
         # 4. 极速等待 0.1 秒
         time.sleep(0.1)
