@@ -70,22 +70,46 @@ def inject_turbo_engine(driver):
 
                 XMLHttpRequest.prototype.send = function(data) {
                     var url = this._turbo_url || "";
-                    // 捕获选课相关的 POST 请求
-                    if (url && data && (
-                        url.indexOf("choose") !== -1 || url.indexOf("Choose") !== -1 ||
-                        url.indexOf("addCourse") !== -1 || url.indexOf("xk") !== -1
-                    )) {
-                        window.__ENROLLMENT_API__ = {
-                            url: url,
-                            method: this._turbo_method || "POST",
-                            data: (typeof data === "string" ? data : ""),
-                            timestamp: Date.now()
-                        };
-                        console.log("[TURBO] 捕获选课 API:", url, "参数:", data);
+                    // 排除翻页/加载数据的 API（这些不是选课！）
+                    var isPageLoad = (url.indexOf("loadFanCourse") !== -1 ||
+                                     url.indexOf("loadCourse") !== -1 ||
+                                     url.indexOf("pageIndex") !== -1 ||
+                                     url.indexOf("queryList") !== -1);
+
+                    if (url && data && !isPageLoad) {
+                        // 捕获真正的选课 API（choose/add/save/elect/submit 等）
+                        var isEnrollment = (
+                            url.indexOf("choose") !== -1 || url.indexOf("Choose") !== -1 ||
+                            url.indexOf("addCourse") !== -1 || url.indexOf("addElective") !== -1 ||
+                            url.indexOf("saveCourse") !== -1 || url.indexOf("submit") !== -1 ||
+                            url.indexOf("elect") !== -1 || url.indexOf("Elect") !== -1
+                        );
+                        if (isEnrollment) {
+                            window.__ENROLLMENT_API__ = {
+                                url: url,
+                                method: this._turbo_method || "POST",
+                                data: (typeof data === "string" ? data : ""),
+                                timestamp: Date.now()
+                            };
+                            console.log("[TURBO] ★★★ 捕获真正选课 API:", url, "参数:", data);
+                        }
+                        // 记录所有非翻页 POST 请求，方便调试
+                        if (this._turbo_method === "POST") {
+                            if (!window.__ALL_POST_APIS__) window.__ALL_POST_APIS__ = [];
+                            window.__ALL_POST_APIS__.push({
+                                url: url, data: (typeof data === "string" ? data : "").substring(0, 200),
+                                timestamp: Date.now()
+                            });
+                            // 只保留最近 20 条
+                            if (window.__ALL_POST_APIS__.length > 20) {
+                                window.__ALL_POST_APIS__ = window.__ALL_POST_APIS__.slice(-20);
+                            }
+                            console.log("[TURBO] POST 请求:", url);
+                        }
                     }
                     return origSend.apply(this, arguments);
                 };
-                console.log("[TURBO] XHR 拦截器已激活");
+                console.log("[TURBO] XHR 拦截器已激活（已排除翻页 API）");
             }
 
             // ===== B. MutationObserver 0ms 秒杀引擎（只注入一次）=====
@@ -584,21 +608,29 @@ if __name__ == "__main__":
 
         # 3. 定期状态输出
         if round_count % 20 == 0:
-            # 检查是否已捕获 API
+            # 检查是否已捕获真正的选课 API
             api_info = ""
             try:
                 api_data = driver.execute_script("return window.__ENROLLMENT_API__;")
                 if api_data:
-                    api_info = f" | API已捕获: {api_data.get('url', '?')}"
-                    now = time.time()
-                    if now - last_api_log_time > 60:
-                        last_api_log_time = now
-                        print(f"  🎯 [API 捕获详情] URL: {api_data.get('url', '?')}, 参数: {api_data.get('data', '?')[:100]}")
+                    api_info = f" | 选课API: {api_data.get('url', '?').split('?')[0]}"
+                else:
+                    api_info = " | 选课API: 未捕获"
+
+                # 显示最近的所有 POST 请求（帮助发现真正的选课接口）
+                now = time.time()
+                if now - last_api_log_time > 30:
+                    last_api_log_time = now
+                    all_posts = driver.execute_script("return window.__ALL_POST_APIS__ || [];")
+                    if all_posts:
+                        print(f"  📡 [最近 POST 请求一览]:")
+                        for p in all_posts[-5:]:
+                            print(f"      → {p.get('url', '?').split('?')[0]}  参数: {p.get('data', '')[:80]}")
             except Exception:
                 pass
 
             status_desc = f"✓第{page_target}页" if status == "page_clicked" else f"?{status}"
-            print(f"[{time.strftime('%H:%M:%S')}] 🔄 第 {round_count} 轮 [{status_desc}] 单发去重·满员排除·有空必秒抢{api_info}")
+            print(f"[{time.strftime('%H:%M:%S')}] 🔄 第 {round_count} 轮 [{status_desc}] 单发去重·有空必秒抢{api_info}")
 
         # 4. 极速等待 0.1 秒
         time.sleep(0.1)
