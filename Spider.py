@@ -584,28 +584,24 @@ if __name__ == "__main__":
     while True:
         round_count += 1
 
-        # 确保引擎始终注入（页面可能刷新重载）
-        inject_turbo_engine(driver)
+        # 引擎注入：每 50 轮检查一次（防止页面刷新丢失，但不拖慢每轮）
+        if round_count % 50 == 0:
+            inject_turbo_engine(driver)
 
-        # 0. 预清理残留弹窗（防止阻挡后续操作）
-        if round_count % 5 == 0:
-            clear_all_dialogs(driver)
-
-        # 1. 精准扫描 + 单发点击（每轮最多点 1 门课）
+        # 1. 扫描 + 单发点击
         hit_count = scan_and_rush_turbo(driver, already_selected)
 
-        # 如果刚点了课，多等一会儿让弹窗流程走完
+        # 点了课后短暂等待弹窗流程，然后清残留
         if hit_count > 0:
-            time.sleep(0.8)
+            time.sleep(0.3)
             clear_all_dialogs(driver)
 
         # 2. 刷新当前页
-        status = refresh_page_exclusive(driver, page_target)
+        refresh_page_exclusive(driver, page_target)
 
-        # 3. 定期状态输出
-        if round_count % 50 == 0:
-            status_desc = f"✓第{page_target}页" if status == "page_clicked" else f"?{status}"
-            print(f"[{time.strftime('%H:%M:%S')}] 🔄 第 {round_count} 轮 [{status_desc}]")
+        # 3. 心跳日志
+        if round_count % 100 == 0:
+            print(f"[{time.strftime('%H:%M:%S')}] 🔄 第 {round_count} 轮")
 
-        # 4. 极速等待 0.1 秒
-        time.sleep(0.1)
+        # 4. 50ms 极速轮询
+        time.sleep(0.05)
